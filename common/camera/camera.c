@@ -17,15 +17,15 @@ static camera_config_t camera_config = {
     .pin_vsync = VSYNC_GPIO_NUM,
     .pin_href = HREF_GPIO_NUM,
     .pin_pclk = PCLK_GOIO_NUM,
-    .xclk_freq_hz = 8000000, // 20MHz clock
+    .xclk_freq_hz = 8000000, // 8MHz clock
     .ledc_timer = LEDC_TIMER_0,
     .ledc_channel = LEDC_CHANNEL_0,
-    .pixel_format = PIXFORMAT_JPEG, // Định dạng JPEG cho video
-    .frame_size = FRAMESIZE_QQVGA,  // 320x240
-    .jpeg_quality = 25, // Chất lượng JPEG (15 để cân bằng kích thước và tốc độ)
-    .fb_count = 3,      // 2 frame buffer để tăng frame rate
-    .grab_mode = CAMERA_GRAB_LATEST,  // Lấy frame mới nhất
-    .fb_location = CAMERA_FB_IN_PSRAM // Lưu frame trong PSRAM
+    .pixel_format = PIXFORMAT_JPEG,   // JPEG
+    .frame_size = FRAMESIZE_QVGA,     // 320x240
+    .jpeg_quality = 15,               // JPEG Quality
+    .fb_count = 2,                    // 2 frame buffer
+    .grab_mode = CAMERA_GRAB_LATEST,  // Get latest frame
+    .fb_location = CAMERA_FB_IN_PSRAM // Store in PSRAM
 };
 
 void camera_init() {
@@ -44,12 +44,12 @@ void camera_init() {
   }
   ESP_LOGI(CAMERA_TAG, "Camera initialized successfully");
 
-  // Tinh chỉnh camera để tăng frame rate
+  // Re-config
   sensor_t *s = esp_camera_sensor_get();
-  s->set_framesize(s, FRAMESIZE_QQVGA); // Xác nhận lại 320x240
-  s->set_quality(s, 25);                // Chất lượng JPEG
-  s->set_vflip(s, 0);                   // Không lật dọc
-  s->set_hmirror(s, 0);                 // Không lật ngang
+  s->set_framesize(s, FRAMESIZE_QVGA); // 320x240
+  s->set_quality(s, 15);               // JPEG quality
+  s->set_vflip(s, 0);                  // No vertical flip
+  s->set_hmirror(s, 0);                // No horizontal flip
   s->set_brightness(s, 0);
   s->set_contrast(s, 0);
 }
