@@ -23,7 +23,7 @@
 #include "imu.h"
 
 #define WIFI_SSID "NVT"
-#define WIFI_PASS "12345678"
+#define WIFI_PASS "12345678910"
 #define UDP_SERVER_IP "192.168.238.195"
 #define UDP_PORT 1234
 #define WIFI_CONNECTED_BIT BIT0
@@ -52,15 +52,16 @@ void app_main(void) {
   wifi_init_sta();
   camera_init();
   // MPU6050 init
-  imu_init(&bus_handle);
+  // imu_init(&bus_handle);
 
   // FreeRTOS task
   // xTaskCreate(capture_video, "capture_video", 4096, NULL, 5, NULL);
   xTaskCreatePinnedToCore(&udp_stream_task, "udp_stream_task", 8192, NULL, 5,
                           NULL, WIFI_UDP_IP_CORE_ID);
   // Read imu data
-  xTaskCreate(mpu6050_read_task, "mpu6050_read_task", 4096, (void *)bus_handle,
-              5, NULL);
+  // xTaskCreate(mpu6050_read_task, "mpu6050_read_task", 4096, (void
+  // *)bus_handle,
+  //             5, NULL);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
