@@ -21,13 +21,16 @@
 #include "camera.h"
 #include "chip_info.h"
 #include "imu.h"
+#include "srf.h"
 
 #define WIFI_SSID "NVT"
 #define WIFI_PASS "12345678910"
-#define UDP_SERVER_IP "192.168.238.195"
+#define UDP_SERVER_IP "192.168.18.195"
 #define UDP_PORT 1234
+#define LOCAL_PORT 12346
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_UDP_IP_CORE_ID 1
+#define WIFI_UDP_IP_CORE_ID 0
+#define MAIN_CORE 1
 
 static const char *MAIN_TAG = "MAIN";
 static const char *WIFI_TAG = "UDP_WIFI";
@@ -38,8 +41,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
 void wifi_init_sta(void);
 void udp_stream_task(void *pvParameters);
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data);
+static void udp_receive_task(void *pvParameters);
 
 void app_main(void) {
   ESP_LOGI(MAIN_TAG, "Start Program!");
@@ -51,6 +53,26 @@ void app_main(void) {
   nvs_flash_init();
   wifi_init_sta();
   camera_init();
+
+  srf_gpio_config();
+
+  /*while (1) {*/
+  /*  // Gửi xung TRIG*/
+  /*  trigger_pulse();*/
+  /**/
+  /*  // Đo thời gian xung ECHO*/
+  /*  int64_t duration = measure_echo_pulse();*/
+  /**/
+  /*  // Tính khoảng cách*/
+  /*  float distance = calculate_distance(duration);*/
+  /**/
+  /*  // In kết quả*/
+  /*  printf("Khoang cach: %.2f cm\n", distance);*/
+  /**/
+  /*  // Đợi 100ms trước khi đo lại*/
+  /*  vTaskDelay(100 / portTICK_PERIOD_MS);*/
+  /*}*/
+
   // MPU6050 init
   // imu_init(&bus_handle);
 
@@ -58,6 +80,8 @@ void app_main(void) {
   // xTaskCreate(capture_video, "capture_video", 4096, NULL, 5, NULL);
   xTaskCreatePinnedToCore(&udp_stream_task, "udp_stream_task", 8192, NULL, 5,
                           NULL, WIFI_UDP_IP_CORE_ID);
+  xTaskCreatePinnedToCore(&udp_receive_task, "udp_receive_task", 8192, NULL, 5,
+                          NULL, MAIN_CORE);
   // Read imu data
   // xTaskCreate(mpu6050_read_task, "mpu6050_read_task", 4096, (void
   // *)bus_handle,
@@ -118,6 +142,48 @@ void wifi_init_sta(void) {
   xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE,
                       portMAX_DELAY);
   ESP_LOGI(WIFI_TAG, "WiFi connected, starting UDP...");
+}
+
+// Task nhận dữ liệu UDP (chạy trên lõi 1)
+static void udp_receive_task(void *pvParameters) {
+  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+  if (sock < 0) {
+    ESP_LOGE(WIFI_TAG, "Failed to create socket");
+    vTaskDelete(NULL);
+  }
+
+  struct sockaddr_in local_addr = {
+      .sin_addr.s_addr = INADDR_ANY,
+      .sin_family = AF_INET,
+      .sin_port = htons(LOCAL_PORT),
+  };
+
+  if (bind(sock, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0) {
+    ESP_LOGE(WIFI_TAG, "Failed to bind socket");
+    close(sock);
+    vTaskDelete(NULL);
+  }
+
+  char rx_buffer[1024];
+  struct sockaddr_in source_addr;
+  socklen_t socklen = sizeof(source_addr);
+
+  while (1) {
+    int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
+                       (struct sockaddr *)&source_addr, &socklen);
+    if (len < 0) {
+      ESP_LOGE(WIFI_TAG, "recvfrom failed: %d", errno);
+    } else {
+      rx_buffer[len] = 0; // Null-terminate
+      ESP_LOGI(WIFI_TAG, "Received %d bytes from %s:%d: %s", len,
+               inet_ntoa(source_addr.sin_addr), ntohs(source_addr.sin_port),
+               rx_buffer);
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+
+  close(sock);
+  vTaskDelete(NULL);
 }
 
 void udp_stream_task(void *pvParameters) {
