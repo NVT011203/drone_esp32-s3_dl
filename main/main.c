@@ -3,13 +3,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "esp_camera.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "lwip/dns.h"
 #include "lwip/err.h"
@@ -25,7 +28,7 @@
 
 #define WIFI_SSID "NVT"
 #define WIFI_PASS "12345678910"
-#define UDP_SERVER_IP "192.168.18.195"
+#define UDP_SERVER_IP "192.168.101.195"
 #define UDP_PORT 1234
 #define LOCAL_PORT 12346
 #define WIFI_CONNECTED_BIT BIT0
@@ -40,6 +43,9 @@ static EventGroupHandle_t wifi_event_group;
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
 void wifi_init_sta(void);
+void initialize_sntp();
+void obtain_time(void);
+void read_distance_task(void *pvParameters);
 void udp_stream_task(void *pvParameters);
 static void udp_receive_task(void *pvParameters);
 
@@ -52,26 +58,12 @@ void app_main(void) {
   // Init
   nvs_flash_init();
   wifi_init_sta();
+  // initialize_sntp();
+  // obtain_time();
+
   camera_init();
 
   srf_gpio_config();
-
-  /*while (1) {*/
-  /*  // Gửi xung TRIG*/
-  /*  trigger_pulse();*/
-  /**/
-  /*  // Đo thời gian xung ECHO*/
-  /*  int64_t duration = measure_echo_pulse();*/
-  /**/
-  /*  // Tính khoảng cách*/
-  /*  float distance = calculate_distance(duration);*/
-  /**/
-  /*  // In kết quả*/
-  /*  printf("Khoang cach: %.2f cm\n", distance);*/
-  /**/
-  /*  // Đợi 100ms trước khi đo lại*/
-  /*  vTaskDelay(100 / portTICK_PERIOD_MS);*/
-  /*}*/
 
   // MPU6050 init
   // imu_init(&bus_handle);
@@ -80,7 +72,7 @@ void app_main(void) {
   // xTaskCreate(capture_video, "capture_video", 4096, NULL, 5, NULL);
   xTaskCreatePinnedToCore(&udp_stream_task, "udp_stream_task", 8192, NULL, 5,
                           NULL, WIFI_UDP_IP_CORE_ID);
-  xTaskCreatePinnedToCore(&udp_receive_task, "udp_receive_task", 8192, NULL, 5,
+  xTaskCreatePinnedToCore(&udp_receive_task, "udp_receive_task", 8192, NULL, 4,
                           NULL, MAIN_CORE);
   // Read imu data
   // xTaskCreate(mpu6050_read_task, "mpu6050_read_task", 4096, (void
@@ -142,6 +134,39 @@ void wifi_init_sta(void) {
   xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE,
                       portMAX_DELAY);
   ESP_LOGI(WIFI_TAG, "WiFi connected, starting UDP...");
+}
+
+// Set time
+void initialize_sntp() {
+  sntp_setoperatingmode(SNTP_OPMODE_POLL);
+  sntp_setservername(0, "pool.ntp.org");
+  sntp_init();
+}
+
+void obtain_time(void) {
+  time_t now;
+  struct tm timeinfo;
+  int retry = 0;
+  const int retry_count = 10;
+
+  while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET &&
+         ++retry < retry_count) {
+    ESP_LOGI(WIFI_TAG, "Đang chờ đồng bộ thời gian (%d/%d)...", retry,
+             retry_count);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+  }
+
+  time(&now);
+  localtime_r(&now, &timeinfo);
+
+  if (retry >= retry_count) {
+    ESP_LOGE(WIFI_TAG, "Không thể đồng bộ thời gian!");
+    return;
+  }
+
+  char strftime_buf[64];
+  strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+  ESP_LOGI(WIFI_TAG, "Thời gian hiện tại: %s", strftime_buf);
 }
 
 // Task nhận dữ liệu UDP (chạy trên lõi 1)
@@ -206,9 +231,34 @@ void udp_stream_task(void *pvParameters) {
       vTaskDelay(100 / portTICK_PERIOD_MS);
       continue;
     }
+    // Gửi xung TRIG
+    trigger_pulse();
+    // Đo thời gian xung ECHO
+    int64_t duration = measure_echo_pulse();
+    // Tính khoảng cách*/
+    float distance = calculate_distance(duration);
+    printf("Khoang cach: %.2f cm\n", distance);
+
+    // Print time second
+    // struct timeval tv_now;
+    // gettimeofday(&tv_now, NULL);
+    // int64_t time_us = (int64_t)tv_now.tv_sec * 1000000LL + tv_now.tv_usec;
+    // double time_s = (double)time_us / 1000000.0;
+    // int32_t time_ms = tv_now.tv_sec * 1000 + tv_now.tv_usec / 1000;
+    // ESP_LOGI("TIME SECOND TAG", "CURRENT TIME: %.6f second", time_s);
+    // ESP_LOGI("TIME SECOND TAG",
+    //          "Unix timestamp: %" PRIi64 " giây, %ld microsecond",
+    //          (int64_t)tv_now.tv_sec, tv_now.tv_usec);
+    // ESP_LOGI("TIME SECOND TAG", "UNIX TIMESTAMP: %d microsecond ", time_ms);
+
+    // time_t now;
+    // time(&now);
+    // ESP_LOGI("TIME SECOND TAG", "CURRENT TIME: lf");
+    // End
 
     int sent = sendto(sock, fb->buf, fb->len, 0, (struct sockaddr *)&dest_addr,
                       sizeof(dest_addr));
+
     if (sent < 0) {
       ESP_LOGE(CAMERA_TAG, "Error sending UDP: errno %d", errno);
     } else {
@@ -226,4 +276,20 @@ void udp_stream_task(void *pvParameters) {
   }
 
   close(sock);
+}
+
+void read_distance_task(void *pvParameters) {
+  while (1) {
+    // Gửi xung TRIG
+    trigger_pulse();
+    // Đo thời gian xung ECHO
+    int64_t duration = measure_echo_pulse();
+    // Tính khoảng cách*/
+    float distance = calculate_distance(duration);
+
+    // In kết quả*/
+    printf("Khoang cach: %.2f cm\n", distance);
+    // Đợi 100ms trước khi đo lại
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
 }
